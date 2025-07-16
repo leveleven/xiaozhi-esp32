@@ -22,10 +22,12 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "ota.cc"
             "settings.cc"
             "background_task.cc"
+            "jpeg/decoder.c"
+            "jpeg/test.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing")
+set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" "jpeg")
 
 # 添加 IOT 相关文件
 file(GLOB IOT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/iot/things/*.cc)
@@ -123,6 +125,11 @@ idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES "assets/err_reg.p3" "assets/err_pin.p3" "assets/wificonfig.p3" "assets/upgrade.p3"
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
+                    )
+
+# 添加JPEG静态库
+target_link_libraries(${COMPONENT_LIB} 
+                    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/jpeg/lib/libesp_new_jpeg.a
                     )
 
 # 使用 target_compile_definitions 来定义 BOARD_TYPE

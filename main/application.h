@@ -17,6 +17,9 @@
 #include "ota.h"
 #include "background_task.h"
 
+// JPEG解码器测试
+#include "jpeg/test.h"
+
 #if CONFIG_USE_AUDIO_PROCESSING
 #include "wake_word_detect.h"
 #include "audio_processor.h"
@@ -61,6 +64,9 @@ public:
     void StartListening();
     void StopListening();
     void UpdateIotStates();
+
+    // JPEG解码器测试方法
+    void TestJpegDecoder();
 
 private:
     Application();

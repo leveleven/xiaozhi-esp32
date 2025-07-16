@@ -664,3 +664,45 @@ void Application::UpdateIotStates() {
         protocol_->SendIotStates(states);
     }
 }
+
+// JPEG解码器测试实现
+void Application::TestJpegDecoder() {
+    ESP_LOGI(TAG, "Starting JPEG decoder test...");
+    
+    // 初始化JPEG测试
+    esp_err_t ret = jpeg_test_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize JPEG test");
+        return;
+    }
+    
+    // 测试1: JPEG解码功能
+    ret = jpeg_test_decode();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "JPEG decode test failed");
+        return;
+    }
+    
+    // 测试2: JPEG流解码功能
+    ret = jpeg_test_stream_decode();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "JPEG stream decode test failed");
+        return;
+    }
+    
+    // 测试3: JPEG块解码功能
+    ret = jpeg_test_block_decode();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "JPEG block decode test failed");
+        return;
+    }
+    
+    // 测试4: 内存使用情况
+    ret = jpeg_test_memory_usage();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "JPEG memory usage test failed");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "All JPEG decoder tests completed successfully!");
+}
