@@ -19,11 +19,10 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "iot/thing_manager.cc"
             "system_info.cc"
             "application.cc"
-            "ota.cc"
+            # "ota.cc"  # OTA功能已注释掉
             "settings.cc"
             "background_task.cc"
             "jpeg/decoder.c"
-            "jpeg/test.cc"
             "main.cc"
             )
 

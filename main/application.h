@@ -14,11 +14,8 @@
 #include <opus_resampler.h>
 
 #include "protocol.h"
-#include "ota.h"
+// #include "ota.h"  // OTA功能已注释掉
 #include "background_task.h"
-
-// JPEG解码器测试
-#include "jpeg/test.h"
 
 #if CONFIG_USE_AUDIO_PROCESSING
 #include "wake_word_detect.h"
@@ -65,9 +62,6 @@ public:
     void StopListening();
     void UpdateIotStates();
 
-    // JPEG解码器测试方法
-    void TestJpegDecoder();
-
 private:
     Application();
     ~Application();
@@ -76,7 +70,7 @@ private:
     WakeWordDetect wake_word_detect_;
     AudioProcessor audio_processor_;
 #endif
-    Ota ota_;
+    // Ota ota_;  // OTA功能已注释掉
     std::mutex mutex_;
     std::list<std::function<void()>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;

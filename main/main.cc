@@ -25,8 +25,9 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     // 测试JPEG解码器
-    ESP_LOGI(TAG, "Testing JPEG decoder functionality...");
-    Application::GetInstance().TestJpegDecoder();
+    // ESP_LOGI(TAG, "Testing JPEG decoder functionality...");
+    // Application::GetInstance().TestJpegDecoder();
+    // Application::GetInstance().TestVideoEmotion();
 
     // Launch the application
     Application::GetInstance().Start();

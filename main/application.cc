@@ -14,6 +14,7 @@
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
+#include <dirent.h>
 
 #define TAG "Application"
 
@@ -43,8 +44,9 @@ Application::Application() {
     event_group_ = xEventGroupCreate();
     background_task_ = new BackgroundTask(4096 * 8);
 
-    ota_.SetCheckVersionUrl(CONFIG_OTA_VERSION_URL);
-    ota_.SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+    // OTA功能已注释掉
+    // ota_.SetCheckVersionUrl(CONFIG_OTA_VERSION_URL);
+    // ota_.SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
 }
 
 Application::~Application() {
@@ -55,6 +57,8 @@ Application::~Application() {
 }
 
 void Application::CheckNewVersion() {
+    // OTA功能已注释掉
+    /*
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
     // Check if there is a new firmware version available
@@ -119,13 +123,17 @@ void Application::CheckNewVersion() {
         // Check again in 60 seconds
         vTaskDelay(pdMS_TO_TICKS(60000));
     }
+    */
 }
 
 void Application::DisplayActivationCode() {
+    // OTA功能已注释掉
+    /*
     ESP_LOGW(TAG, "Activation Message: %s", ota_.GetActivationMessage().c_str());
     ESP_LOGW(TAG, "Activation Code: %s", ota_.GetActivationCode().c_str());
     auto display = Board::GetInstance().GetDisplay();
     display->ShowNotification(ota_.GetActivationMessage(), 30000);
+    */
 }
 
 void Application::Alert(const std::string& title, const std::string& message) {
@@ -370,12 +378,14 @@ void Application::Start() {
         }
     });
 
-    // Check for new firmware version or get the MQTT broker address
+    // OTA功能已注释掉 - Check for new firmware version or get the MQTT broker address
+    /*
     xTaskCreate([](void* arg) {
         Application* app = (Application*)arg;
         app->CheckNewVersion();
         vTaskDelete(NULL);
     }, "check_new_version", 4096 * 2, this, 1, nullptr);
+    */
 
 
 #if CONFIG_USE_AUDIO_PROCESSING
@@ -604,11 +614,13 @@ void Application::SetDeviceState(DeviceState state) {
     auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
+    // 使用LVGL显示JPEG图片
+    display->SetJpgEmotionLVGL("/storage/maiduo.jpg");
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             display->SetStatus("待命");
-            display->SetEmotion("neutral");
+            // display->SetEmotion("neutral");
 #ifdef CONFIG_USE_AUDIO_PROCESSING
             audio_processor_.Stop();
 #endif
@@ -663,46 +675,4 @@ void Application::UpdateIotStates() {
         last_iot_states_ = states;
         protocol_->SendIotStates(states);
     }
-}
-
-// JPEG解码器测试实现
-void Application::TestJpegDecoder() {
-    ESP_LOGI(TAG, "Starting JPEG decoder test...");
-    
-    // 初始化JPEG测试
-    esp_err_t ret = jpeg_test_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize JPEG test");
-        return;
-    }
-    
-    // 测试1: JPEG解码功能
-    ret = jpeg_test_decode();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "JPEG decode test failed");
-        return;
-    }
-    
-    // 测试2: JPEG流解码功能
-    ret = jpeg_test_stream_decode();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "JPEG stream decode test failed");
-        return;
-    }
-    
-    // 测试3: JPEG块解码功能
-    ret = jpeg_test_block_decode();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "JPEG block decode test failed");
-        return;
-    }
-    
-    // 测试4: 内存使用情况
-    ret = jpeg_test_memory_usage();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "JPEG memory usage test failed");
-        return;
-    }
-    
-    ESP_LOGI(TAG, "All JPEG decoder tests completed successfully!");
 }

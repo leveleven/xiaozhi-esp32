@@ -1,10 +1,11 @@
 menu "Xiaozhi Assistant"
 
-config OTA_VERSION_URL
-    string "OTA Version URL"
-    default "https://api.tenclass.net/xiaozhi/ota/"
-    help
-        The application will access this URL to check for updates.
+# OTA功能已注释掉
+# config OTA_VERSION_URL
+#     string "OTA Version URL"
+#     default "https://api.tenclass.net/xiaozhi/ota/"
+#     help
+#         The application will access this URL to check for updates.
 
 choice CONNECTION_TYPE
     prompt "Connection Type"

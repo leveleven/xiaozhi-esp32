@@ -5,10 +5,16 @@
 #include <esp_err.h>
 #include <driver/ledc.h>
 #include <vector>
+#include <cmath>
+#include <cstring>
+#include <cstdint>
 #include <esp_lvgl_port.h>
 #include <esp_timer.h>
+#include <esp_heap_caps.h>
 
 #include "board.h"
+#include "display/lv_display.h"
+#include "jpeg/decoder.h"
 
 #define TAG "LcdDisplay"
 #define LCD_LEDC_CH LEDC_CHANNEL_0
@@ -102,7 +108,18 @@ LcdDisplay::~LcdDisplay() {
         esp_timer_stop(backlight_timer_);
         esp_timer_delete(backlight_timer_);
     }
-    // 然后再清理 LVGL 对象
+    
+    // 清理图片资源
+    CleanupCurrentImage();
+    
+    // 删除LVGL图片对象
+    if (emotion_img_) {
+        lv_obj_del(emotion_img_);
+        emotion_img_ = nullptr;
+        ESP_LOGI(TAG, "LVGL图片对象已删除");
+    }
+    
+    // 然后再清理其他 LVGL 对象
     if (content_ != nullptr) {
         lv_obj_del(content_);
     }
@@ -337,4 +354,206 @@ void LcdDisplay::SetIcon(const char* icon) {
     }
     lv_obj_set_style_text_font(emotion_label_, &font_awesome_30_4, 0);
     lv_label_set_text(emotion_label_, icon);
+}
+
+void LcdDisplay::SetJpgEmotionLVGL(const char* jpg_path) {
+    if (!jpg_path) {
+        ESP_LOGE(TAG, "图片路径为空");
+        return;
+    }
+
+    ESP_LOGI(TAG, "显示JPEG图像: %s", jpg_path);
+    
+    DisplayLockGuard lock(this);
+    
+    // 1. 清理之前的图片资源
+    CleanupCurrentImage();
+    
+    // 2. 读取JPEG文件
+    FILE* fp = fopen(jpg_path, "rb");
+    if (!fp) {
+        ESP_LOGE(TAG, "无法打开文件: %s", jpg_path);
+        return;
+    }
+    
+    // 获取文件大小
+    fseek(fp, 0, SEEK_END);
+    long jpg_len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    
+    if (jpg_len <= 0 || jpg_len > 512 * 1024) {  // 限制512KB
+        ESP_LOGE(TAG, "文件大小异常: %ld 字节", jpg_len);
+        fclose(fp);
+        return;
+    }
+
+    ESP_LOGI(TAG, "JPEG文件大小: %ld 字节", jpg_len);
+
+    // 3. 分配并读取JPEG数据（优先使用SPIRAM）
+    uint8_t* jpg_buf = (uint8_t*)heap_caps_malloc(jpg_len, 
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!jpg_buf) {
+        jpg_buf = (uint8_t*)malloc(jpg_len);  // 回退到内部RAM
+        if (!jpg_buf) {
+            ESP_LOGE(TAG, "内存分配失败: %ld 字节", jpg_len);
+            fclose(fp);
+            return;
+        }
+        ESP_LOGI(TAG, "使用内部RAM分配JPEG缓冲区");
+    } else {
+        ESP_LOGI(TAG, "使用SPIRAM分配JPEG缓冲区");
+    }
+    
+    if (fread(jpg_buf, 1, jpg_len, fp) != jpg_len) {
+        ESP_LOGE(TAG, "文件读取失败");
+        free(jpg_buf);
+        fclose(fp);
+        return;
+    }
+    fclose(fp);
+
+    // jpg_len and jpg_buf is input, out_buf and out_len is output
+    uint8_t* out_buf = nullptr;
+    int out_len = 0;
+    jpeg_dec_header_info_t out_info = {};
+    jpeg_error_t ret = esp_jpeg_decode_one_picture(jpg_buf, jpg_len, &out_buf, &out_len, &out_info);
+    
+    if (ret != JPEG_ERR_OK) {
+        ESP_LOGE(TAG, "JPEG解码失败: %d", ret);
+        // jpeg_free_align(rgb_buf);
+        jpeg_free_align(out_buf);
+        return;
+    }
+
+    ESP_LOGI(TAG, "JPEG解码成功，RGB数据大小: %d 字节", out_len);
+
+    // 6. 创建LVGL图片对象（如果还未创建）
+    if (emotion_img_ == nullptr) {
+        emotion_img_ = lv_img_create(lv_screen_active());
+        if (!emotion_img_) {
+            ESP_LOGE(TAG, "创建图片对象失败");
+            // jpeg_free_align(rgb_buf);
+            jpeg_free_align(out_buf);
+            return;
+        }
+        ESP_LOGI(TAG, "创建LVGL图片对象成功");
+    }
+
+    // 7. 验证解码数据
+    // if (rgb_len != img_width * img_height * 3) {
+    if (out_len != out_info.width * out_info.height * 3) {
+        ESP_LOGE(TAG, "数据大小不匹配: 期望 %d, 实际 %d", out_info.width * out_info.height * 3, out_len);
+        // jpeg_free_align(rgb_buf);
+        jpeg_free_align(out_buf);
+        return;
+    }
+    
+    // 检查RGB888数据完整性（检查前几个像素）
+    // uint8_t* pixel_data = rgb_buf;
+    uint8_t* pixel_data = out_buf;
+    
+    // 修复颜色反转问题：ESP32 JPEG解码器输出BGR，但LVGL需要RGB
+    ESP_LOGI(TAG, "执行BGR到RGB颜色转换...");
+    // for (int i = 0; i < rgb_len; i += 3) {
+    for (int i = 0; i < out_len; i += 3) {
+        // 交换B和R通道 (BGR -> RGB)
+        uint8_t temp = pixel_data[i];      // 保存B
+        pixel_data[i] = pixel_data[i + 2]; // B = R
+        pixel_data[i + 2] = temp;          // R = B
+        // G通道保持不变
+    }
+
+
+    // 8. 创建LVGL图片描述符（使用静态变量避免动态分配）
+    static lv_img_dsc_t img_dsc;
+    memset(&img_dsc, 0, sizeof(lv_img_dsc_t));
+    
+    // img_dsc.header.w = img_width;
+    // img_dsc.header.h = img_height;
+    img_dsc.header.w = out_info.width;
+    img_dsc.header.h = out_info.height;
+    img_dsc.header.cf = LV_COLOR_FORMAT_RGB888;  // 匹配RGB888解码器输出
+    // img_dsc.data_size = rgb_len;
+    img_dsc.data_size = out_len;
+    img_dsc.data = out_buf;
+
+    ESP_LOGI(TAG, "图片描述符创建完成 - 尺寸: %dx%d, 格式: RGB888, 数据: %p", 
+             out_info.width, out_info.height, out_buf);
+
+    // 9. 设置图片源并显示
+    lv_img_set_src(emotion_img_, &img_dsc);
+    
+    // 获取屏幕区域尺寸
+    lv_coord_t content_width = lv_obj_get_width(lv_screen_active());
+    lv_coord_t content_height = lv_obj_get_height(lv_screen_active());
+
+    ESP_LOGI(TAG, "显示区域分析 - 内容: %dx%d", content_width, content_height);
+    ESP_LOGI(TAG, "原始图片尺寸: %dx%d", out_info.width, out_info.height);
+    
+    // 计算缩放比例，确保图片完全显示（不裁剪）
+    float scale_x = (float)content_width / out_info.width;
+    float scale_y = (float)content_height / out_info.height;
+    float scale = 1.0f;  // 默认不缩放
+    
+    // 如果图片超出显示区域，进行等比例缩放
+    if (out_info.width > content_width || out_info.height > content_height) {
+        // 选择较小的缩放比例，确保图片完全显示
+        scale = (scale_x < scale_y) ? scale_x : scale_y;
+        ESP_LOGI(TAG, "图片需要缩放 - 水平缩放比例: %.3f, 垂直缩放比例: %.3f, 选择: %.3f", 
+                 scale_x, scale_y, scale);
+    }
+    
+    // 计算缩放后的尺寸
+    lv_coord_t display_width = (lv_coord_t)(out_info.width * scale);
+    lv_coord_t display_height = (lv_coord_t)(out_info.height * scale);
+    
+    // 设置图片显示尺寸
+    lv_obj_set_size(emotion_img_, display_width, display_height);
+    
+    if (scale < 1.0f) {
+        ESP_LOGI(TAG, "图片缩放显示: %dx%d -> %dx%d (缩放比例: %.3f)", 
+                 out_info.width, out_info.height, display_width, display_height, scale);
+    } else {
+        ESP_LOGI(TAG, "图片原尺寸显示: %dx%d", display_width, display_height);
+    }
+    
+    // 居中显示并设置样式
+    lv_obj_center(emotion_img_);
+    lv_obj_clear_flag(emotion_img_, LV_OBJ_FLAG_HIDDEN);
+
+    // 9. 保存数据引用用于后续清理
+    // current_img_data_ = rgb_buf;
+    current_img_data_ = out_buf;
+
+    ESP_LOGI(TAG, "图片显示完成");
+    
+    // 10. 打印内存使用情况
+    size_t free_heap = esp_get_free_heap_size();
+    size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "当前可用内存 - 堆: %zu 字节, SPIRAM: %zu 字节", free_heap, free_spiram);
+}
+
+void LcdDisplay::CleanupCurrentImage() {
+    // 隐藏图片对象（但不删除，重复使用）
+    if (emotion_img_) {
+        lv_obj_add_flag(emotion_img_, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(TAG, "图片对象已隐藏");
+    }
+    
+    // 释放图片数据
+    if (current_img_data_) {
+        jpeg_free_align(current_img_data_);
+        current_img_data_ = nullptr;
+        ESP_LOGI(TAG, "图片数据已释放");
+    }
+    
+    // 恢复其他UI元素的显示
+    if (emotion_label_) {
+        lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(TAG, "恢复表情标签显示");
+    }
+    if (chat_message_label_) {
+        lv_obj_clear_flag(chat_message_label_, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(TAG, "恢复聊天消息标签显示");
+    }
 }

@@ -7,6 +7,7 @@
 #include "i2c_device.h"
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
+#include <esp_spiffs.h>
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -81,7 +82,7 @@ private:
         buscfg.sclk_io_num = LCD_SCLK_PIN;
         buscfg.quadwp_io_num = GPIO_NUM_NC;
         buscfg.quadhd_io_num = GPIO_NUM_NC;
-        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
+        buscfg.max_transfer_sz = 320 * 240 * sizeof(uint16_t);  // 明确指定大小，避免过大
         ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
@@ -110,7 +111,7 @@ private:
         io_config.dc_gpio_num = LCD_DC_PIN;
         io_config.spi_mode = 0;
         io_config.pclk_hz = 20 * 1000 * 1000;
-        io_config.trans_queue_depth = 7;
+        io_config.trans_queue_depth = 3;  // 减少队列深度以节省内存
         io_config.lcd_cmd_bits = 8;
         io_config.lcd_param_bits = 8;
         esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io);
@@ -147,6 +148,17 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker"));
     }
 
+    void MountStorage() {
+        // Mount the storage partition
+        esp_vfs_spiffs_conf_t conf = {
+            .base_path = "/storage",
+            .partition_label = "storage",
+            .max_files = 5,
+            .format_if_mount_failed = true,
+        };
+        esp_vfs_spiffs_register(&conf);
+    }
+
 public:
     atk_dnesp32s3() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
@@ -154,6 +166,7 @@ public:
         InitializeSt7789Display();
         InitializeButtons();
         InitializeIot();
+        MountStorage();
     }
 
     virtual Led* GetLed() override {

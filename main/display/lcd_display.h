@@ -35,6 +35,14 @@ protected:
     void OnBacklightTimer();
     void InitializeBacklight(gpio_num_t backlight_pin);
 
+    // 图片显示相关成员
+    lv_obj_t* emotion_img_ = nullptr;          // LVGL图片对象
+    uint8_t* current_img_data_ = nullptr;      // 当前图片数据缓冲区
+    
+    void CleanupCurrentImage();                // 清理当前图片资源
+
+protected:
+
     virtual void SetupUI();
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
@@ -48,6 +56,7 @@ public:
 
     virtual void SetChatMessage(const std::string &role, const std::string &content) override;
     virtual void SetEmotion(const std::string &emotion) override;
+    virtual void SetJpgEmotionLVGL(const char* jpg_path) override;
     virtual void SetIcon(const char* icon) override;
     virtual void SetBacklight(uint8_t brightness) override;
 };

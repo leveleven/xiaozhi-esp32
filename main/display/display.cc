@@ -209,6 +209,11 @@ void Display::SetIcon(const char* icon) {
     lv_label_set_text(emotion_label_, icon);
 }
 
+void Display::SetJpgEmotionLVGL(const char* jpg_path) {
+    // 默认实现：对于不支持JPEG显示的显示类，忽略调用
+    ESP_LOGW(TAG, "SetJpgEmotionLVGL not implemented for this display type: %s", jpg_path);
+}
+
 void Display::SetChatMessage(const std::string &role, const std::string &content) {
 }
 

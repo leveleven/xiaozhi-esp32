@@ -22,3 +22,6 @@ add_compile_options(-Wno-missing-field-initializers)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(xiaozhi)
 
+# 添加SPIFFS支持 - 使用storage分区
+spiffs_create_partition_image(storage data/video FLASH_IN_PROJECT)
+

@@ -9,3 +9,6 @@ sdkconfig
 dependencies.lock
 .env
 releases/
+.clangd
+.cache/
+.data/

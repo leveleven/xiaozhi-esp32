@@ -11,21 +11,17 @@
 static jpeg_pixel_format_t j_type     = JPEG_PIXEL_FORMAT_RGB888;
 static jpeg_rotate_t       j_rotation = JPEG_ROTATE_0D;
 
-jpeg_error_t esp_jpeg_decode_one_picture(uint8_t *input_buf, int len, uint8_t **output_buf, int *out_len)
+jpeg_error_t esp_jpeg_decode_one_picture(uint8_t *input_buf, int len, uint8_t **output_buf, int *out_len, jpeg_dec_header_info_t *out_info)
 {
     uint8_t *out_buf = NULL;
     jpeg_error_t ret = JPEG_ERR_OK;
     jpeg_dec_io_t *jpeg_io = NULL;
-    jpeg_dec_header_info_t *out_info = NULL;
+    // jpeg_dec_header_info_t *out_info = NULL;
 
     // Generate default configuration
     jpeg_dec_config_t config = DEFAULT_JPEG_DEC_CONFIG();
     config.output_type = j_type;
     config.rotate = j_rotation;
-    // config.scale.width       = 0;
-    // config.scale.height      = 0;
-    // config.clipper.width     = 0;
-    // config.clipper.height    = 0;
 
     // Create jpeg_dec handle
     jpeg_dec_handle_t jpeg_dec = NULL;
@@ -42,11 +38,11 @@ jpeg_error_t esp_jpeg_decode_one_picture(uint8_t *input_buf, int len, uint8_t **
     }
 
     // Create out_info handle
-    out_info = calloc(1, sizeof(jpeg_dec_header_info_t));
-    if (out_info == NULL) {
-        ret = JPEG_ERR_NO_MEM;
-        goto jpeg_dec_failed;
-    }
+    // out_info = calloc(1, sizeof(jpeg_dec_header_info_t));
+    // if (out_info == NULL) {
+    //     ret = JPEG_ERR_NO_MEM;
+    //     goto jpeg_dec_failed;
+    // }
 
     // Set input buffer and buffer len to io_callback
     jpeg_io->inbuf = input_buf;
@@ -90,9 +86,9 @@ jpeg_dec_failed:
     if (jpeg_io) {
         free(jpeg_io);
     }
-    if (out_info) {
-        free(out_info);
-    }
+    // if (out_info) {
+    //     free(out_info);
+    // }
     return ret;
 }
 
@@ -102,7 +98,6 @@ jpeg_error_t esp_jpeg_decode_one_picture_block(unsigned char *input_buf, int len
     jpeg_error_t ret = JPEG_ERR_OK;
     jpeg_dec_io_t *jpeg_io = NULL;
     jpeg_dec_header_info_t *out_info = NULL;
-    FILE *f_out = NULL;
 
     // Generate default configuration
     jpeg_dec_config_t config = DEFAULT_JPEG_DEC_CONFIG();
@@ -160,30 +155,12 @@ jpeg_error_t esp_jpeg_decode_one_picture_block(unsigned char *input_buf, int len
         goto jpeg_dec_failed;
     }
 
-#if TEST_USE_SDCARD
-    // Open output file on SDCard, should init SDcard first
-    f_out = fopen("/sdcard/esp_jpeg_decode_one_picture_block.bin", "wb");
-    if (f_out == NULL) {
-        ret = JPEG_ERR_FAIL;
-        goto jpeg_dec_failed;
-    }
-#endif  /* TEST_USE_SDCARD */
-
     // Decode jpeg data
     for (int block_cnt = 0; block_cnt < process_count; block_cnt++) {
         ret = jpeg_dec_process(jpeg_dec, jpeg_io);
         if (ret != JPEG_ERR_OK) {
             goto jpeg_dec_failed;
         }
-
-#if TEST_USE_SDCARD
-        // do something - to sdcard
-        int written_data = fwrite(jpeg_io->outbuf, 1, jpeg_io->out_size, f_out);
-        if (written_data != jpeg_io->out_size) {
-            ret = JPEG_ERR_FAIL;
-            goto jpeg_dec_failed;
-        }
-#endif  /* TEST_USE_SDCARD */
     }
 
     // Decoder deinitialize
@@ -196,11 +173,6 @@ jpeg_dec_failed:
         free(out_info);
     }
     jpeg_free_align(output_block);
-#if TEST_USE_SDCARD
-    if (f_out) {
-        fclose(f_out);
-    }
-#endif  /* TEST_USE_SDCARD */
     return ret;
 }
 
