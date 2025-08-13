@@ -10,7 +10,7 @@
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "../jpeg/decoder.h"
+#include "jpeg/decoder.h"
 
 static const char* TAG = "AVI_PRELOAD";
 
@@ -38,7 +38,7 @@ static uint8_t* allocate_jpeg_buffer(avi_memory_pool_t* pool);
 static uint8_t* allocate_rgb_buffer(avi_memory_pool_t* pool);
 static void release_jpeg_buffer(avi_memory_pool_t* pool, uint8_t* buffer);
 static void release_rgb_buffer(avi_memory_pool_t* pool, uint8_t* buffer);
-static int decode_frame_to_rgb(avi_preload_buffer_t* buffer, int use_rgb565);
+static int decode_frame_to_rgb(avi_preload_player_t* player, avi_preload_buffer_t* buffer);
 static void preload_task_function(void* param);
 static int load_frame_data(avi_preload_player_t* player, uint32_t frame_index, avi_preload_buffer_t* buffer);
 static void cleanup_preload_buffer(avi_preload_buffer_t* buffer, avi_memory_pool_t* pool);
@@ -677,7 +677,25 @@ avi_preload_player_t* avi_create_preload_player(avi_container_t* container, int 
         return NULL;
     }
     
-    ESP_LOGI(TAG, "预加载播放器创建成功: %dx%d, %d帧, %dfps, JPEG最大%d字节, RGB最大%d字节", 
+    // 初始化JPEG解码器 (流式解码优化)
+    player->jpeg_handle = (jpeg_handle_t*)malloc(sizeof(jpeg_handle_t));
+    if (!player->jpeg_handle) {
+        ESP_LOGE(TAG, "JPEG解码器句柄分配失败");
+        cleanup_memory_pool(&player->memory_pool);
+        free(player);
+        return NULL;
+    }
+    
+    jpeg_error_t jpeg_ret = esp_jpeg_stream_open(player->jpeg_handle);
+    if (jpeg_ret != JPEG_ERR_OK) {
+        ESP_LOGE(TAG, "JPEG流式解码器初始化失败: %d", jpeg_ret);
+        free(player->jpeg_handle);
+        cleanup_memory_pool(&player->memory_pool);
+        free(player);
+        return NULL;
+    }
+    
+    ESP_LOGI(TAG, "预加载播放器创建成功: %dx%d, %d帧, %dfps, JPEG最大%d字节, RGB最大%d字节 (使用流式解码器)", 
              container->header.width, container->header.height, 
              container->frame_count, player->frame_rate,
              max_jpeg_size, max_rgb_size);
@@ -698,13 +716,23 @@ void avi_destroy_preload_player(avi_preload_player_t* player) {
     cleanup_preload_buffer(&player->current_frame, &player->memory_pool);
     cleanup_preload_buffer(&player->next_frame, &player->memory_pool);
     
+    // 清理JPEG解码器 (流式解码优化)
+    if (player->jpeg_handle) {
+        jpeg_error_t jpeg_ret = esp_jpeg_stream_close(player->jpeg_handle);
+        if (jpeg_ret != JPEG_ERR_OK) {
+            ESP_LOGW(TAG, "JPEG流式解码器关闭失败: %d", jpeg_ret);
+        }
+        free(player->jpeg_handle);
+        player->jpeg_handle = NULL;
+    }
+    
     // 清理内存池
     cleanup_memory_pool(&player->memory_pool);
     
     // 释放播放器结构
     free(player);
     
-    ESP_LOGI(TAG, "预加载播放器已销毁");
+    ESP_LOGI(TAG, "预加载播放器已销毁 (包含流式解码器)");
 }
 
 // 开始预加载播放
@@ -730,9 +758,9 @@ int avi_start_preload_playback(avi_preload_player_t* player) {
         return AVI_ERR_INVALID_FORMAT;
     }
     
-    // 解码第一帧
-    if (decode_frame_to_rgb(&player->current_frame, player->use_rgb565) != AVI_ERR_OK) {
-        ESP_LOGE(TAG, "解码第一帧失败");
+    // 解码第一帧 (使用流式解码器)
+    if (decode_frame_to_rgb(player, &player->current_frame) != AVI_ERR_OK) {
+        ESP_LOGE(TAG, "流式解码第一帧失败");
         return AVI_ERR_INVALID_FORMAT;
     }
     
@@ -843,9 +871,9 @@ int avi_switch_to_next_frame(avi_preload_player_t* player) {
             return AVI_ERR_INVALID_FORMAT;
         }
         
-        // 解码新帧
-        if (decode_frame_to_rgb(&player->current_frame, player->use_rgb565) != AVI_ERR_OK) {
-            ESP_LOGE(TAG, "解码帧 %d 失败", next_index);
+        // 解码新帧 (使用流式解码器)
+        if (decode_frame_to_rgb(player, &player->current_frame) != AVI_ERR_OK) {
+            ESP_LOGE(TAG, "流式解码帧 %d 失败", next_index);
             player->decode_errors++;
             return AVI_ERR_INVALID_FORMAT;
         }
@@ -1051,23 +1079,26 @@ static void release_rgb_buffer(avi_memory_pool_t* pool, uint8_t* buffer) {
     ESP_LOGD(TAG, "释放RGB缓冲区");
 }
 
-// 解码帧到RGB
-static int decode_frame_to_rgb(avi_preload_buffer_t* buffer, int use_rgb565) {
-    if (!buffer || !buffer->jpeg_data || buffer->jpeg_size == 0) {
+// 解码帧到RGB (流式解码优化)
+static int decode_frame_to_rgb(avi_preload_player_t* player, avi_preload_buffer_t* buffer) {
+    if (!player || !player->jpeg_handle || !buffer || !buffer->jpeg_data || buffer->jpeg_size == 0) {
         return AVI_ERR_INVALID_PARAM;
     }
     
     buffer->is_decoding = 1;
     
-    // 使用JPEG解码器解码
+    // 使用流式JPEG解码器解码 (性能优化)
     uint8_t* output_buf = NULL;
     int output_len = 0;
     
-    jpeg_error_t result = esp_jpeg_decode_one_picture(buffer->jpeg_data, buffer->jpeg_size, 
-                                                      &output_buf, &output_len);
+    ESP_LOGD(TAG, "开始流式解码帧: %d字节", buffer->jpeg_size);
+    
+    jpeg_error_t result = esp_jpeg_stream_decode(player->jpeg_handle, 
+                                                buffer->jpeg_data, buffer->jpeg_size, 
+                                                &output_buf, &output_len);
     
     if (result != JPEG_ERR_OK) {
-        ESP_LOGE(TAG, "JPEG解码失败: %d", result);
+        ESP_LOGE(TAG, "流式JPEG解码失败: %d", result);
         buffer->is_decoding = 0;
         return AVI_ERR_INVALID_FORMAT;
     }
@@ -1078,23 +1109,24 @@ static int decode_frame_to_rgb(avi_preload_buffer_t* buffer, int use_rgb565) {
         buffer->rgb_size = output_len;
         
         // BGR到RGB转换 (如果需要)
-        if (!use_rgb565) {  // RGB888格式需要转换
+        if (!player->use_rgb565) {  // RGB888格式需要转换
             uint8_t* pixel_data = buffer->rgb_data;
             for (int i = 0; i < output_len; i += 3) {
                 uint8_t temp = pixel_data[i];
                 pixel_data[i] = pixel_data[i + 2];
                 pixel_data[i + 2] = temp;
             }
+            ESP_LOGD(TAG, "BGR转RGB转换完成");
         }
     }
     
-    // 释放JPEG解码器分配的内存
-    if (output_buf) {
-        jpeg_free_align(output_buf);
-    }
+    // 注意：流式解码器的内存由解码器管理，不需要手动释放output_buf
+    // 这是相比esp_jpeg_decode_one_picture的另一个优势
     
     buffer->is_decoding = 0;
-    ESP_LOGD(TAG, "帧解码完成: %dx%d, %d字节", buffer->width, buffer->height, buffer->rgb_size);
+    ESP_LOGD(TAG, "流式解码完成: %dx%d, %d字节 (RGB%s)", 
+             buffer->width, buffer->height, buffer->rgb_size,
+             player->use_rgb565 ? "565" : "888");
     
     return AVI_ERR_OK;
 }
@@ -1141,9 +1173,9 @@ static void preload_task_function(void* param) {
             continue;
         }
         
-        // 解码下一帧
-        if (decode_frame_to_rgb(&player->next_frame, player->use_rgb565) != AVI_ERR_OK) {
-            ESP_LOGE(TAG, "预解码帧 %d 失败", next_index);
+        // 解码下一帧 (使用流式解码器)
+        if (decode_frame_to_rgb(player, &player->next_frame) != AVI_ERR_OK) {
+            ESP_LOGE(TAG, "流式预解码帧 %d 失败", next_index);
             cleanup_preload_buffer(&player->next_frame, &player->memory_pool);
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;

@@ -125,6 +125,9 @@ typedef struct {
     int frame_skip_ratio;               // 跳帧比例 (1=不跳帧, 2=跳1帧, 3=跳2帧)
     int use_rgb565;                     // 是否使用RGB565格式 (否则RGB888)
     
+    // JPEG解码器 (流式解码优化)
+    jpeg_handle_t* jpeg_handle;         // JPEG解码器句柄
+    
     // 统计信息
     uint32_t frames_decoded;            // 已解码帧数
     uint32_t frames_skipped;            // 跳过帧数
