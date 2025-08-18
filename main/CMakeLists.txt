@@ -23,10 +23,11 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "settings.cc"
             "background_task.cc"
             "jpeg/decoder.c"
+            "avi_player/avi_player.c"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" "jpeg")
+set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" "jpeg" "avi_player")
 
 # 添加 IOT 相关文件
 file(GLOB IOT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/iot/things/*.cc)

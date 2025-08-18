@@ -1,12 +1,12 @@
 #include "application.h"
 #include "board.h"
 #include "display.h"
-#include "system_info.h"
-#include "ml307_ssl_transport.h"
+// #include "system_info.h"
+// #include "ml307_ssl_transport.h"
 #include "audio_codec.h"
-#include "mqtt_protocol.h"
-#include "websocket_protocol.h"
-#include "font_awesome_symbols.h"
+#include "protocols/mqtt_protocol.h"
+#include "protocols/websocket_protocol.h"
+// #include "font_awesome_symbols.h"
 #include "iot/thing_manager.h"
 
 #include <cstring>
@@ -615,7 +615,11 @@ void Application::SetDeviceState(DeviceState state) {
     auto led = board.GetLed();
     led->OnStateChanged();
     // 使用LVGL显示JPEG图片
-    display->SetJpgEmotionLVGL("/storage/maiduo.jpg");
+    // display->SetJpgEmotionLVGL("/storage/maiduo.jpg");
+    display->SetAviEmotionLVGL("/storage/standby.avi");
+    // 如果文件不存在，尝试使用相对路径
+    // display->SetAviEmotionLVGL("data/video/Digidol-standby-1.avi");
+    
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:

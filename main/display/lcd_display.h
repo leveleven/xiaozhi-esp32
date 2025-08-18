@@ -14,6 +14,9 @@
 
 #include <atomic>
 
+// 官方AVI播放器头文件
+#include "avi_player.h"
+
 class LcdDisplay : public Display {
 protected:
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
@@ -39,7 +42,17 @@ protected:
     lv_obj_t* emotion_img_ = nullptr;          // LVGL图片对象
     uint8_t* current_img_data_ = nullptr;      // 当前图片数据缓冲区
     
+    // 官方AVI播放器相关成员
+    avi_player_handle_t avi_handle_ = nullptr;  // AVI播放器句柄
+    bool avi_playing_ = false;                  // 播放状态
+    
     void CleanupCurrentImage();                // 清理当前图片资源
+    void DisplayImageWithLVGL(uint8_t* rgb_data, int width, int height);  // LVGL图片显示逻辑
+    
+    // AVI播放器回调函数
+    static void VideoFrameCallback(frame_data_t *data, void *arg);
+    static void AudioFrameCallback(frame_data_t *data, void *arg);
+    static void PlayEndCallback(void *arg);
 
 protected:
 
@@ -57,6 +70,7 @@ public:
     virtual void SetChatMessage(const std::string &role, const std::string &content) override;
     virtual void SetEmotion(const std::string &emotion) override;
     virtual void SetJpgEmotionLVGL(const char* jpg_path) override;
+    virtual void SetAviEmotionLVGL(const char* avi_path) override;
     virtual void SetIcon(const char* icon) override;
     virtual void SetBacklight(uint8_t brightness) override;
 };

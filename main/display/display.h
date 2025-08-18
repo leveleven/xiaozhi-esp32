@@ -22,6 +22,7 @@ public:
     virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
     virtual void SetEmotion(const std::string &emotion);
     virtual void SetJpgEmotionLVGL(const char* jpg_path);
+    virtual void SetAviEmotionLVGL(const char* avi_path);
     virtual void ShowTestPattern() {}  // 测试图案显示，默认空实现
     virtual void SetChatMessage(const std::string &role, const std::string &content);
     virtual void SetIcon(const char* icon);

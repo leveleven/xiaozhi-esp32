@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
+#include <cinttypes>
+#include <algorithm>
 #include <esp_lvgl_port.h>
 #include <esp_timer.h>
 #include <esp_heap_caps.h>
@@ -15,6 +17,7 @@
 #include "board.h"
 #include "display/lv_display.h"
 #include "jpeg/decoder.h"
+#include "avi_player.h"
 
 #define TAG "LcdDisplay"
 #define LCD_LEDC_CH LEDC_CHANNEL_0
@@ -101,12 +104,43 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
     SetupUI();
 
     SetBacklight(brightness_);
+    
+    // 初始化官方AVI播放器
+    avi_player_config_t avi_config = {
+        .buffer_size = 50 * 1024,  // 50KB缓冲区
+        .video_cb = VideoFrameCallback,
+        .audio_cb = AudioFrameCallback,
+        .audio_set_clock_cb = nullptr,  // 不需要音频时钟设置
+        .avi_play_end_cb = PlayEndCallback,
+        .priority = 5,
+        .coreID = 0,
+        .user_data = this,
+        .stack_size = 4096,
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
+        .stack_in_psram = false
+#endif
+    };
+    
+    esp_err_t ret = avi_player_init(avi_config, &avi_handle_);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "AVI播放器初始化失败: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "AVI播放器初始化成功");
+    }
 }
 
 LcdDisplay::~LcdDisplay() {
     if (backlight_timer_ != nullptr) {
         esp_timer_stop(backlight_timer_);
         esp_timer_delete(backlight_timer_);
+    }
+    
+    // 停止AVI播放
+    if (avi_handle_ != nullptr) {
+        avi_player_play_stop(avi_handle_);
+        avi_player_deinit(avi_handle_);
+        avi_handle_ = nullptr;
+        ESP_LOGI(TAG, "AVI播放器已清理");
     }
     
     // 清理图片资源
@@ -412,7 +446,7 @@ void LcdDisplay::SetJpgEmotionLVGL(const char* jpg_path) {
     }
     fclose(fp);
 
-    // jpg_len and jpg_buf is input, out_buf and out_len is output
+    // 4. JPEG解码
     uint8_t* out_buf = nullptr;
     int out_len = 0;
     jpeg_dec_header_info_t out_info = {};
@@ -420,41 +454,22 @@ void LcdDisplay::SetJpgEmotionLVGL(const char* jpg_path) {
     
     if (ret != JPEG_ERR_OK) {
         ESP_LOGE(TAG, "JPEG解码失败: %d", ret);
-        // jpeg_free_align(rgb_buf);
         jpeg_free_align(out_buf);
         return;
     }
 
     ESP_LOGI(TAG, "JPEG解码成功，RGB数据大小: %d 字节", out_len);
 
-    // 6. 创建LVGL图片对象（如果还未创建）
-    if (emotion_img_ == nullptr) {
-        emotion_img_ = lv_img_create(lv_screen_active());
-        if (!emotion_img_) {
-            ESP_LOGE(TAG, "创建图片对象失败");
-            // jpeg_free_align(rgb_buf);
-            jpeg_free_align(out_buf);
-            return;
-        }
-        ESP_LOGI(TAG, "创建LVGL图片对象成功");
-    }
-
-    // 7. 验证解码数据
-    // if (rgb_len != img_width * img_height * 3) {
+    // 5. 验证解码数据
     if (out_len != out_info.width * out_info.height * 3) {
         ESP_LOGE(TAG, "数据大小不匹配: 期望 %d, 实际 %d", out_info.width * out_info.height * 3, out_len);
-        // jpeg_free_align(rgb_buf);
         jpeg_free_align(out_buf);
         return;
     }
     
-    // 检查RGB888数据完整性（检查前几个像素）
-    // uint8_t* pixel_data = rgb_buf;
+    // 6. 颜色格式转换：BGR -> RGB
     uint8_t* pixel_data = out_buf;
-    
-    // 修复颜色反转问题：ESP32 JPEG解码器输出BGR，但LVGL需要RGB
     ESP_LOGI(TAG, "执行BGR到RGB颜色转换...");
-    // for (int i = 0; i < rgb_len; i += 3) {
     for (int i = 0; i < out_len; i += 3) {
         // 交换B和R通道 (BGR -> RGB)
         uint8_t temp = pixel_data[i];      // 保存B
@@ -463,71 +478,15 @@ void LcdDisplay::SetJpgEmotionLVGL(const char* jpg_path) {
         // G通道保持不变
     }
 
-
-    // 8. 创建LVGL图片描述符（使用静态变量避免动态分配）
-    static lv_img_dsc_t img_dsc;
-    memset(&img_dsc, 0, sizeof(lv_img_dsc_t));
+    // 7. 使用LVGL显示图片
+    DisplayImageWithLVGL(out_buf, out_info.width, out_info.height);
     
-    // img_dsc.header.w = img_width;
-    // img_dsc.header.h = img_height;
-    img_dsc.header.w = out_info.width;
-    img_dsc.header.h = out_info.height;
-    img_dsc.header.cf = LV_COLOR_FORMAT_RGB888;  // 匹配RGB888解码器输出
-    // img_dsc.data_size = rgb_len;
-    img_dsc.data_size = out_len;
-    img_dsc.data = out_buf;
-
-    ESP_LOGI(TAG, "图片描述符创建完成 - 尺寸: %dx%d, 格式: RGB888, 数据: %p", 
-             out_info.width, out_info.height, out_buf);
-
-    // 9. 设置图片源并显示
-    lv_img_set_src(emotion_img_, &img_dsc);
-    
-    // 获取屏幕区域尺寸
-    lv_coord_t content_width = lv_obj_get_width(lv_screen_active());
-    lv_coord_t content_height = lv_obj_get_height(lv_screen_active());
-
-    ESP_LOGI(TAG, "显示区域分析 - 内容: %dx%d", content_width, content_height);
-    ESP_LOGI(TAG, "原始图片尺寸: %dx%d", out_info.width, out_info.height);
-    
-    // 计算缩放比例，确保图片完全显示（不裁剪）
-    float scale_x = (float)content_width / out_info.width;
-    float scale_y = (float)content_height / out_info.height;
-    float scale = 1.0f;  // 默认不缩放
-    
-    // 如果图片超出显示区域，进行等比例缩放
-    if (out_info.width > content_width || out_info.height > content_height) {
-        // 选择较小的缩放比例，确保图片完全显示
-        scale = (scale_x < scale_y) ? scale_x : scale_y;
-        ESP_LOGI(TAG, "图片需要缩放 - 水平缩放比例: %.3f, 垂直缩放比例: %.3f, 选择: %.3f", 
-                 scale_x, scale_y, scale);
-    }
-    
-    // 计算缩放后的尺寸
-    lv_coord_t display_width = (lv_coord_t)(out_info.width * scale);
-    lv_coord_t display_height = (lv_coord_t)(out_info.height * scale);
-    
-    // 设置图片显示尺寸
-    lv_obj_set_size(emotion_img_, display_width, display_height);
-    
-    if (scale < 1.0f) {
-        ESP_LOGI(TAG, "图片缩放显示: %dx%d -> %dx%d (缩放比例: %.3f)", 
-                 out_info.width, out_info.height, display_width, display_height, scale);
-    } else {
-        ESP_LOGI(TAG, "图片原尺寸显示: %dx%d", display_width, display_height);
-    }
-    
-    // 居中显示并设置样式
-    lv_obj_center(emotion_img_);
-    lv_obj_clear_flag(emotion_img_, LV_OBJ_FLAG_HIDDEN);
-
-    // 9. 保存数据引用用于后续清理
-    // current_img_data_ = rgb_buf;
+    // 8. 保存数据引用用于后续清理
     current_img_data_ = out_buf;
 
     ESP_LOGI(TAG, "图片显示完成");
     
-    // 10. 打印内存使用情况
+    // 9. 打印内存使用情况
     size_t free_heap = esp_get_free_heap_size();
     size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG, "当前可用内存 - 堆: %zu 字节, SPIRAM: %zu 字节", free_heap, free_spiram);
@@ -556,4 +515,133 @@ void LcdDisplay::CleanupCurrentImage() {
         lv_obj_clear_flag(chat_message_label_, LV_OBJ_FLAG_HIDDEN);
         ESP_LOGI(TAG, "恢复聊天消息标签显示");
     }
+}
+
+void LcdDisplay::SetAviEmotionLVGL(const char* avi_file_path) {
+    if (!avi_file_path) {
+        ESP_LOGE(TAG, "无效的文件路径");
+        return;
+    }
+    
+    if (!avi_handle_) {
+        ESP_LOGE(TAG, "AVI播放器未初始化");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "开始播放AVI文件: %s", avi_file_path);
+    
+    // 检查文件是否存在
+    FILE* test_file = fopen(avi_file_path, "rb");
+    if (!test_file) {
+        ESP_LOGE(TAG, "AVI文件不存在或无法访问: %s", avi_file_path);
+        return;
+    }
+    fclose(test_file);
+    
+    // 使用官方AVI播放器播放文件
+    esp_err_t ret = avi_player_play_from_file(avi_handle_, avi_file_path);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "AVI播放启动失败: %s", esp_err_to_name(ret));
+        return;
+    }
+    
+    avi_playing_ = true;
+    ESP_LOGI(TAG, "AVI播放已启动，使用异步播放模式");
+}
+
+// AVI播放器回调函数实现
+void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    if (!display || !data || data->type != FRAME_TYPE_VIDEO) {
+        return;
+    }
+    
+    ESP_LOGD(TAG, "收到视频帧: %dx%d, %zu字节", 
+             data->video_info.width, data->video_info.height, data->data_bytes);
+    
+    // 使用LVGL显示视频帧
+    display->DisplayImageWithLVGL(data->data, data->video_info.width, data->video_info.height);
+}
+
+void LcdDisplay::AudioFrameCallback(frame_data_t *data, void *arg) {
+    // 音频帧回调，目前不需要处理
+    ESP_LOGD(TAG, "收到音频帧: %zu字节", data->data_bytes);
+}
+
+void LcdDisplay::PlayEndCallback(void *arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    if (!display) {
+        return;
+    }
+    
+    display->avi_playing_ = false;
+    ESP_LOGI(TAG, "AVI播放结束");
+}
+
+void LcdDisplay::DisplayImageWithLVGL(uint8_t* rgb_data, int width, int height) {
+    // 1. 创建LVGL图片对象（如果还未创建）
+    if (emotion_img_ == nullptr) {
+        emotion_img_ = lv_img_create(lv_screen_active());
+        if (!emotion_img_) {
+            ESP_LOGE(TAG, "创建图片对象失败");
+            return;
+        }
+        ESP_LOGI(TAG, "创建LVGL图片对象成功");
+    }
+
+    // 2. 创建LVGL图片描述符（使用静态变量避免动态分配）
+    static lv_img_dsc_t img_dsc;
+    memset(&img_dsc, 0, sizeof(lv_img_dsc_t));
+    
+    img_dsc.header.w = width;
+    img_dsc.header.h = height;
+    img_dsc.header.cf = LV_COLOR_FORMAT_RGB888;  // 匹配RGB888解码器输出
+    img_dsc.data_size = width * height * 3;
+    img_dsc.data = rgb_data;
+
+    ESP_LOGI(TAG, "图片描述符创建完成 - 尺寸: %dx%d, 格式: RGB888, 数据: %p", 
+             width, height, rgb_data);
+
+    // 3. 设置图片源并显示
+    lv_img_set_src(emotion_img_, &img_dsc);
+    
+    // 4. 获取屏幕区域尺寸
+    lv_coord_t content_width = lv_obj_get_width(lv_screen_active());
+    lv_coord_t content_height = lv_obj_get_height(lv_screen_active());
+
+    ESP_LOGI(TAG, "显示区域分析 - 内容: %dx%d", content_width, content_height);
+    ESP_LOGI(TAG, "原始图片尺寸: %dx%d", width, height);
+    
+    // 5. 计算缩放比例，确保图片完全显示（不裁剪）
+    float scale_x = (float)content_width / width;
+    float scale_y = (float)content_height / height;
+    float scale = 1.0f;  // 默认不缩放
+    
+    // 如果图片超出显示区域，进行等比例缩放
+    if (width > content_width || height > content_height) {
+        // 选择较小的缩放比例，确保图片完全显示
+        scale = (scale_x < scale_y) ? scale_x : scale_y;
+        ESP_LOGI(TAG, "图片需要缩放 - 水平缩放比例: %.3f, 垂直缩放比例: %.3f, 选择: %.3f", 
+                 scale_x, scale_y, scale);
+    }
+    
+    // 6. 计算缩放后的尺寸
+    lv_coord_t display_width = (lv_coord_t)(width * scale);
+    lv_coord_t display_height = (lv_coord_t)(height * scale);
+    
+    // 7. 设置图片显示尺寸
+    lv_obj_set_size(emotion_img_, display_width, display_height);
+    
+    if (scale < 1.0f) {
+        ESP_LOGI(TAG, "图片缩放显示: %dx%d -> %dx%d (缩放比例: %.3f)", 
+                 width, height, display_width, display_height, scale);
+    } else {
+        ESP_LOGI(TAG, "图片原尺寸显示: %dx%d", display_width, display_height);
+    }
+    
+    // 8. 居中显示并设置样式
+    lv_obj_center(emotion_img_);
+    lv_obj_clear_flag(emotion_img_, LV_OBJ_FLAG_HIDDEN);
+
+    ESP_LOGI(TAG, "LVGL图片显示完成");
 }

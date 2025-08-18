@@ -13,7 +13,7 @@
 #include <opus_decoder.h>
 #include <opus_resampler.h>
 
-#include "protocol.h"
+#include "protocols/protocol.h"
 // #include "ota.h"  // OTA功能已注释掉
 #include "background_task.h"
 
