@@ -143,6 +143,14 @@ LcdDisplay::~LcdDisplay() {
         ESP_LOGI(TAG, "AVI播放器已清理");
     }
     
+    // 清理JPEG流解码器
+    if (jpeg_stream_ != nullptr) {
+        esp_jpeg_stream_close(jpeg_stream_);
+        free(jpeg_stream_);
+        jpeg_stream_ = nullptr;
+        ESP_LOGI(TAG, "JPEG流解码器已清理");
+    }
+    
     // 清理图片资源
     CleanupCurrentImage();
     
@@ -559,9 +567,134 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
     ESP_LOGD(TAG, "收到视频帧: %dx%d, %zu字节", 
              data->video_info.width, data->video_info.height, data->data_bytes);
     
-    // 使用LVGL显示视频帧
-    display->DisplayImageWithLVGL(data->data, data->video_info.width, data->video_info.height);
+    // 检查是否为MJPG格式
+    if (data->video_info.frame_format == FORMAT_MJEPG) {
+        ESP_LOGD(TAG, "检测到MJPG格式，开始JPEG解码");
+        
+        // 1. 解码MJPG数据
+        uint8_t* out_buf = nullptr;
+        int out_len = 0;
+        jpeg_dec_header_info_t out_info = {};
+        
+        jpeg_error_t ret = esp_jpeg_decode_one_picture(
+            data->data,           // MJPG压缩数据
+            data->data_bytes,     // 压缩数据大小
+            &out_buf,            // 输出RGB缓冲区
+            &out_len,            // RGB数据大小
+            &out_info            // 解码信息
+        );
+        
+        if (ret == JPEG_ERR_OK) {
+            ESP_LOGD(TAG, "JPEG解码成功 - 输出尺寸: %dx%d, 数据大小: %d字节", 
+                     out_info.width, out_info.height, out_len);
+            
+            // 2. 验证解码结果
+            if (out_info.width == data->video_info.width && 
+                out_info.height == data->video_info.height) {
+                
+                // 3. 颜色格式转换：BGR -> RGB
+                ESP_LOGD(TAG, "执行BGR到RGB颜色转换");
+                for (int i = 0; i < out_len; i += 3) {
+                    // 交换B和R通道 (BGR -> RGB)
+                    uint8_t temp = out_buf[i];      // 保存B
+                    out_buf[i] = out_buf[i + 2];    // B = R
+                    out_buf[i + 2] = temp;          // R = B
+                    // G通道保持不变
+                }
+                
+                // 4. 使用LVGL显示解码后的RGB数据
+                display->DisplayImageWithLVGL(out_buf, out_info.width, out_info.height);
+                
+                ESP_LOGD(TAG, "MJPG帧显示完成");
+            } else {
+                ESP_LOGE(TAG, "解码尺寸不匹配 - 期望: %dx%d, 实际: %dx%d", 
+                         data->video_info.width, data->video_info.height, 
+                         out_info.width, out_info.height);
+            }
+            
+            // 5. 释放解码后的数据
+            jpeg_free_align(out_buf);
+        } else {
+            ESP_LOGE(TAG, "JPEG解码失败: %d", ret);
+        }
+    } else {
+        ESP_LOGW(TAG, "不支持的视频格式: %d", data->video_info.frame_format);
+    }
 }
+
+/*
+// 方案二：使用流式解码的VideoFrameCallback实现（可选）
+void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    if (!display || !data || data->type != FRAME_TYPE_VIDEO) {
+        return;
+    }
+    
+    ESP_LOGD(TAG, "收到视频帧: %dx%d, %zu字节", 
+             data->video_info.width, data->video_info.height, data->data_bytes);
+    
+    // 检查是否为MJPG格式
+    if (data->video_info.frame_format == FORMAT_MJEPG) {
+        ESP_LOGD(TAG, "检测到MJPG格式，开始流式JPEG解码");
+        
+        // 1. 初始化JPEG流解码器（如果还未初始化）
+        if (display->jpeg_stream_ == nullptr) {
+            display->jpeg_stream_ = (esp_jpeg_stream_handle_t)malloc(sizeof(struct esp_jpeg_stream));
+            if (display->jpeg_stream_ == nullptr) {
+                ESP_LOGE(TAG, "无法分配JPEG流解码器内存");
+                return;
+            }
+            
+            jpeg_error_t ret = esp_jpeg_stream_open(display->jpeg_stream_);
+            if (ret != JPEG_ERR_OK) {
+                ESP_LOGE(TAG, "JPEG流解码器初始化失败: %d", ret);
+                free(display->jpeg_stream_);
+                display->jpeg_stream_ = nullptr;
+                return;
+            }
+            ESP_LOGD(TAG, "JPEG流解码器初始化成功");
+        }
+        
+        // 2. 流式解码MJPG数据
+        uint8_t* out_buf = nullptr;
+        int out_len = 0;
+        
+        jpeg_error_t ret = esp_jpeg_stream_decode(
+            display->jpeg_stream_,
+            data->data,           // MJPG压缩数据
+            data->data_bytes,     // 压缩数据大小
+            &out_buf,            // 输出RGB缓冲区
+            &out_len             // RGB数据大小
+        );
+        
+        if (ret == JPEG_ERR_OK) {
+            ESP_LOGD(TAG, "流式JPEG解码成功 - 数据大小: %d字节", out_len);
+            
+            // 3. 颜色格式转换：BGR -> RGB
+            ESP_LOGD(TAG, "执行BGR到RGB颜色转换");
+            for (int i = 0; i < out_len; i += 3) {
+                // 交换B和R通道 (BGR -> RGB)
+                uint8_t temp = out_buf[i];      // 保存B
+                out_buf[i] = out_buf[i + 2];    // B = R
+                out_buf[i + 2] = temp;          // R = B
+                // G通道保持不变
+            }
+            
+            // 4. 使用LVGL显示解码后的RGB数据
+            display->DisplayImageWithLVGL(out_buf, data->video_info.width, data->video_info.height);
+            
+            ESP_LOGD(TAG, "MJPG帧显示完成");
+            
+            // 5. 释放解码后的数据
+            jpeg_free_align(out_buf);
+        } else {
+            ESP_LOGE(TAG, "流式JPEG解码失败: %d", ret);
+        }
+    } else {
+        ESP_LOGW(TAG, "不支持的视频格式: %d", data->video_info.frame_format);
+    }
+}
+*/
 
 void LcdDisplay::AudioFrameCallback(frame_data_t *data, void *arg) {
     // 音频帧回调，目前不需要处理

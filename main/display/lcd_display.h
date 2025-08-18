@@ -46,6 +46,9 @@ protected:
     avi_player_handle_t avi_handle_ = nullptr;  // AVI播放器句柄
     bool avi_playing_ = false;                  // 播放状态
     
+    // JPEG流解码器（用于AVI播放中的MJPG解码）
+    esp_jpeg_stream_handle_t jpeg_stream_ = nullptr;  // JPEG流解码器句柄
+    
     void CleanupCurrentImage();                // 清理当前图片资源
     void DisplayImageWithLVGL(uint8_t* rgb_data, int width, int height);  // LVGL图片显示逻辑
     
