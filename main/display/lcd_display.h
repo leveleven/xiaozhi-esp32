@@ -16,6 +16,9 @@
 
 // 官方AVI播放器头文件
 #include "avi_player.h"
+// JPEG解码器前向声明
+struct esp_jpeg_stream;
+typedef struct esp_jpeg_stream *esp_jpeg_stream_handle_t;
 
 class LcdDisplay : public Display {
 protected:

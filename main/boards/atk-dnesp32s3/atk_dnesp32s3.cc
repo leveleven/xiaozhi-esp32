@@ -7,9 +7,7 @@
 #include "i2c_device.h"
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
-#include <esp_vfs_fat.h>
 #include <esp_spiffs.h>
-#include <wear_levelling.h>
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -151,7 +149,7 @@ private:
     }
 
     void MountStorage() {
-        // 先尝试简单的SPIFFS挂载作为备用方案
+        // 挂载SPIFFS文件系统
         esp_vfs_spiffs_conf_t spiffs_conf = {
             .base_path = "/storage",
             .partition_label = "storage", 
@@ -162,23 +160,6 @@ private:
         esp_err_t ret = esp_vfs_spiffs_register(&spiffs_conf);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to mount SPIFFS filesystem (%s)", esp_err_to_name(ret));
-            
-            // 如果SPIFFS失败，尝试FAT
-            ESP_LOGI(TAG, "Trying FAT filesystem...");
-            const esp_vfs_fat_mount_config_t mount_config = {
-                .format_if_mount_failed = true,
-                .max_files = 5,
-                .allocation_unit_size = 4096,
-                .disk_status_check_enable = false
-            };
-            
-            wl_handle_t wl_handle = WL_INVALID_HANDLE;
-            esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/storage", "storage", &mount_config, &wl_handle);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to mount FAT filesystem (%s)", esp_err_to_name(err));
-            } else {
-                ESP_LOGI(TAG, "FAT filesystem mounted at /storage");
-            }
         } else {
             ESP_LOGI(TAG, "SPIFFS filesystem mounted at /storage");
         }

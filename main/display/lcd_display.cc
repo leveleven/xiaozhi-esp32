@@ -564,8 +564,7 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
         return;
     }
     
-    ESP_LOGD(TAG, "收到视频帧: %dx%d, %zu字节", 
-             data->video_info.width, data->video_info.height, data->data_bytes);
+    ESP_LOGI(TAG, "收到视频帧");
     
     // 检查是否为MJPG格式
     if (data->video_info.frame_format == FORMAT_MJEPG) {
@@ -585,15 +584,14 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
         );
         
         if (ret == JPEG_ERR_OK) {
-            ESP_LOGD(TAG, "JPEG解码成功 - 输出尺寸: %dx%d, 数据大小: %d字节", 
-                     out_info.width, out_info.height, out_len);
+            ESP_LOGI(TAG, "JPEG解码成功");
             
             // 2. 验证解码结果
             if (out_info.width == data->video_info.width && 
                 out_info.height == data->video_info.height) {
                 
                 // 3. 颜色格式转换：BGR -> RGB
-                ESP_LOGD(TAG, "执行BGR到RGB颜色转换");
+                ESP_LOGI(TAG, "执行BGR到RGB颜色转换");
                 for (int i = 0; i < out_len; i += 3) {
                     // 交换B和R通道 (BGR -> RGB)
                     uint8_t temp = out_buf[i];      // 保存B
@@ -605,20 +603,18 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
                 // 4. 使用LVGL显示解码后的RGB数据
                 display->DisplayImageWithLVGL(out_buf, out_info.width, out_info.height);
                 
-                ESP_LOGD(TAG, "MJPG帧显示完成");
+                ESP_LOGI(TAG, "MJPG帧显示完成");
             } else {
-                ESP_LOGE(TAG, "解码尺寸不匹配 - 期望: %dx%d, 实际: %dx%d", 
-                         data->video_info.width, data->video_info.height, 
-                         out_info.width, out_info.height);
+                ESP_LOGE(TAG, "解码尺寸不匹配");
             }
             
             // 5. 释放解码后的数据
             jpeg_free_align(out_buf);
         } else {
-            ESP_LOGE(TAG, "JPEG解码失败: %d", ret);
+            ESP_LOGE(TAG, "JPEG解码失败");
         }
     } else {
-        ESP_LOGW(TAG, "不支持的视频格式: %d", data->video_info.frame_format);
+        ESP_LOGW(TAG, "不支持的视频格式");
     }
 }
 
@@ -630,8 +626,7 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
         return;
     }
     
-    ESP_LOGD(TAG, "收到视频帧: %dx%d, %zu字节", 
-             data->video_info.width, data->video_info.height, data->data_bytes);
+    ESP_LOGD(TAG, "收到视频帧");
     
     // 检查是否为MJPG格式
     if (data->video_info.frame_format == FORMAT_MJEPG) {
@@ -647,7 +642,7 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
             
             jpeg_error_t ret = esp_jpeg_stream_open(display->jpeg_stream_);
             if (ret != JPEG_ERR_OK) {
-                ESP_LOGE(TAG, "JPEG流解码器初始化失败: %d", ret);
+                ESP_LOGE(TAG, "JPEG流解码器初始化失败");
                 free(display->jpeg_stream_);
                 display->jpeg_stream_ = nullptr;
                 return;
@@ -668,7 +663,7 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
         );
         
         if (ret == JPEG_ERR_OK) {
-            ESP_LOGD(TAG, "流式JPEG解码成功 - 数据大小: %d字节", out_len);
+            ESP_LOGD(TAG, "流式JPEG解码成功");
             
             // 3. 颜色格式转换：BGR -> RGB
             ESP_LOGD(TAG, "执行BGR到RGB颜色转换");
@@ -688,17 +683,17 @@ void LcdDisplay::VideoFrameCallback(frame_data_t *data, void *arg) {
             // 5. 释放解码后的数据
             jpeg_free_align(out_buf);
         } else {
-            ESP_LOGE(TAG, "流式JPEG解码失败: %d", ret);
+            ESP_LOGE(TAG, "流式JPEG解码失败");
         }
     } else {
-        ESP_LOGW(TAG, "不支持的视频格式: %d", data->video_info.frame_format);
+        ESP_LOGW(TAG, "不支持的视频格式");
     }
 }
 */
 
 void LcdDisplay::AudioFrameCallback(frame_data_t *data, void *arg) {
     // 音频帧回调，目前不需要处理
-    ESP_LOGD(TAG, "收到音频帧: %zu字节", data->data_bytes);
+    ESP_LOGI(TAG, "收到音频帧");
 }
 
 void LcdDisplay::PlayEndCallback(void *arg) {
@@ -742,7 +737,7 @@ void LcdDisplay::DisplayImageWithLVGL(uint8_t* rgb_data, int width, int height) 
     lv_coord_t content_width = lv_obj_get_width(lv_screen_active());
     lv_coord_t content_height = lv_obj_get_height(lv_screen_active());
 
-    ESP_LOGI(TAG, "显示区域分析 - 内容: %dx%d", content_width, content_height);
+    ESP_LOGI(TAG, "显示区域分析 - 内容: %" PRId32 "x%" PRId32, content_width, content_height);
     ESP_LOGI(TAG, "原始图片尺寸: %dx%d", width, height);
     
     // 5. 计算缩放比例，确保图片完全显示（不裁剪）
@@ -766,10 +761,10 @@ void LcdDisplay::DisplayImageWithLVGL(uint8_t* rgb_data, int width, int height) 
     lv_obj_set_size(emotion_img_, display_width, display_height);
     
     if (scale < 1.0f) {
-        ESP_LOGI(TAG, "图片缩放显示: %dx%d -> %dx%d (缩放比例: %.3f)", 
+        ESP_LOGI(TAG, "图片缩放显示: %dx%d -> %" PRId32 "x%" PRId32 " (缩放比例: %.3f)", 
                  width, height, display_width, display_height, scale);
     } else {
-        ESP_LOGI(TAG, "图片原尺寸显示: %dx%d", display_width, display_height);
+        ESP_LOGI(TAG, "图片原尺寸显示: %" PRId32 "x%" PRId32, display_width, display_height);
     }
     
     // 8. 居中显示并设置样式
